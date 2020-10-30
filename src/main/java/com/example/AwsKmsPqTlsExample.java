@@ -94,7 +94,7 @@ public class AwsKmsPqTlsExample {
                 .build();
         CreateKeyResponse createResponse = asyncKMSClient.createKey(createRequest).get();
         String keyId = createResponse.keyMetadata().keyId();
-        LOG.info(() -> "Created CMK ID: " + keyId);
+        LOG.info(() -> "1. Created CMK ID: " + keyId);
 
         /*
          * Step 2: Get the wrapping key and token required to import the local key material. The AlgorithmSpec determines
@@ -107,7 +107,7 @@ public class AwsKmsPqTlsExample {
                 .build();
         GetParametersForImportResponse getParametersResponse =
                 asyncKMSClient.getParametersForImport(getParametersRequest).get();
-        LOG.info(() -> "Received Public RSA Wrapping Key from KMS for CMK import");
+        LOG.info(() -> "2. Received Public RSA Wrapping Key from KMS for CMK import");
 
         /*
          * Step 3: Prepare the parameters for the ImportKeyMaterial call.
@@ -125,7 +125,7 @@ public class AwsKmsPqTlsExample {
          */
         byte[] plaintextAesKey = new byte[AES_KEY_SIZE_BYTES];
         SECURE_RANDOM.nextBytes(plaintextAesKey);
-        LOG.info(() -> "Generated local secure AES Key");
+        LOG.info(() -> "3. Generated local secure AES Key");
 
         /*
          * Use the wrapping key to encrypt the local key material. Then use the token to import the wrapped key
@@ -137,7 +137,7 @@ public class AwsKmsPqTlsExample {
          */
         RSAPublicKey rsaPublicKey = RSAUtils.decodeX509PublicKey(publicKeyBytes);
         byte[] encryptedAesKey = RSAUtils.encryptRSA(rsaPublicKey, plaintextAesKey);
-        LOG.info(() -> "Wrapped local AES Key with public KMS Wrapping Key");
+        LOG.info(() -> "4. Wrapped local AES Key with public KMS Wrapping Key");
 
         /*
          * Step 4: Import the key material using the CMK ID, wrapped key material, and import token. This is the
@@ -155,7 +155,7 @@ public class AwsKmsPqTlsExample {
                 .validTo(Instant.now().plusSeconds(600))
                 .build();
         asyncKMSClient.importKeyMaterial(importRequest).get();
-        LOG.info(() -> String.format("Imported AES key into KMS with CMK ID:%s. Used PQ TLS to protect RSA-wrapped AES key " +
+        LOG.info(() -> String.format("5. Imported AES key into KMS with CMK ID:%s. Used PQ TLS to protect RSA-wrapped AES key " +
                 "in transit.", keyId));
 
         /*
@@ -170,7 +170,7 @@ public class AwsKmsPqTlsExample {
                 .pendingWindowInDays(7)
                 .build();
         ScheduleKeyDeletionResponse deletionResult = asyncKMSClient.scheduleKeyDeletion(deletionRequest).get();
-        LOG.info(() -> String.format("CMK %s is scheduled to be deleted at %s.\n", keyId, deletionResult.deletionDate()));
+        LOG.info(() -> String.format("6. CMK %s is scheduled to be deleted at %s.\n", keyId, deletionResult.deletionDate()));
 
         /*
          * Shut down the SDK and HTTP client. This will free any Java and native resources created for the demo.
