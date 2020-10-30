@@ -61,10 +61,11 @@ public class AwsKmsPqTlsExample {
         /*
          * Check preconditions before continuing. The AWS CRT supports hybrid post-quantum TLS on Linux systems only.
          */
+        LOG.info(() -> "\nConfirm Access to Post-Quantum TLS Ciphers:");
         TlsCipherPreference cipherPreference = TlsCipherPreference.TLS_CIPHER_PREF_KMS_PQ_TLSv1_0_2020_07;
         if (cipherPreference.isSupported()) {
-            LOG.info(() -> cipherPreference.name() + " is available on current platform.");
-            LOG.info(() -> "Hybrid post-quantum cipher are supported and will be used.");
+            LOG.info(() -> "1. " + cipherPreference.name() + " is available on current platform.");
+            LOG.info(() -> "2. Hybrid post-quantum cipher are supported and will be used.");
         } else {
             throw new UnsupportedOperationException("Hybrid post-quantum cipher suites are supported only on Linux systems");
         }
@@ -165,12 +166,13 @@ public class AwsKmsPqTlsExample {
          * test, we will delete it as part of cleanup. After the CMK is deleted, any ciphertexts encrypted under
          * this CMK are permanently unrecoverable.
          */
+        LOG.info(() -> "\nClean Up after Demo:");
         ScheduleKeyDeletionRequest deletionRequest = ScheduleKeyDeletionRequest.builder()
                 .keyId(keyId)
                 .pendingWindowInDays(7)
                 .build();
         ScheduleKeyDeletionResponse deletionResult = asyncKMSClient.scheduleKeyDeletion(deletionRequest).get();
-        LOG.info(() -> String.format("6. CMK %s is scheduled to be deleted at %s.\n", keyId, deletionResult.deletionDate()));
+        LOG.info(() -> String.format("1. CMK %s is scheduled to be deleted at %s.\n", keyId, deletionResult.deletionDate()));
 
         /*
          * Shut down the SDK and HTTP client. This will free any Java and native resources created for the demo.
