@@ -18,12 +18,16 @@
 
 package com.example;
 
+//import static software.amazon.awssdk.crt.io.TlsCipherPreference.TLS_CIPHER_SYSTEM_DEFAULT;
+
+import java.security.SecureRandom;
+import java.security.interfaces.RSAPublicKey;
+import java.time.Instant;
+import java.util.Random;
+
 import com.example.crypto.RSAUtils;
 import software.amazon.awssdk.core.SdkBytes;
-import software.amazon.awssdk.crt.io.TlsCipherPreference;
-import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
-import software.amazon.awssdk.http.crt.AwsCrtAsyncHttpClient;
-import software.amazon.awssdk.services.kms.KmsAsyncClient;
+import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.kms.model.AlgorithmSpec;
 import software.amazon.awssdk.services.kms.model.CreateKeyRequest;
 import software.amazon.awssdk.services.kms.model.CreateKeyResponse;
@@ -42,13 +46,6 @@ import software.amazon.awssdk.services.kms.model.ScheduleKeyDeletionResponse;
 import software.amazon.awssdk.services.kms.model.WrappingKeySpec;
 import software.amazon.awssdk.utils.Logger;
 
-import java.security.SecureRandom;
-import java.security.interfaces.RSAPublicKey;
-import java.time.Instant;
-import java.util.Random;
-
-import static software.amazon.awssdk.crt.io.TlsCipherPreference.*;
-
 /*
  * This Java code shows how to configure the AWS Java SDK 2.0 with the AWS Common Runtime (CRT) HTTP client and PQ
  * cipher suites. Then, it uses the KMS client to import key material into a customer master key (CMK), generate a data
@@ -60,30 +57,36 @@ public class AwsKmsPqTlsExample {
     private static final int AES_KEY_SIZE_BYTES = 256 / 8;
 
     public static void main(String[] args) throws Exception {
-        TlsCipherPreference tlsCipherPreference = TLS_CIPHER_PREF_PQ_TLSv1_0_2021_05;
-
+//        TlsCipherPreference tlsCipherPreference = TLS_CIPHER_SYSTEM_DEFAULT;
+        LOG.info(() -> "Using System default TLS settings");
         /*
          * Check preconditions before continuing. The AWS CRT supports hybrid post-quantum TLS on Linux systems only.
          */
-        if (tlsCipherPreference.isSupported()) {
-            LOG.info(() -> "Hybrid post-quantum ciphers are supported and will be used");
-        } else {
-            throw new UnsupportedOperationException("Hybrid post-quantum cipher suites are supported only on Linux systems");
-        }
+//        if (tlsCipherPreference.isSupported()) {
+//            LOG.info(() -> "Hybrid post-quantum ciphers are supported and will be used");
+//        } else {
+//            throw new UnsupportedOperationException("Hybrid post-quantum cipher suites are supported only on Linux systems");
+//        }
 
-        LOG.info(() -> "Using TLS Cipher Preference: " + tlsCipherPreference.name());
+//        LOG.info(() -> "Using TLS Cipher Preference: " + tlsCipherPreference.name());
         /*
          * Set up a PQ TLS HTTP client that will be used in the rest of the example.
          */
-        SdkAsyncHttpClient awsCrtHttpClient = AwsCrtAsyncHttpClient.builder()
-                .tlsCipherPreference(tlsCipherPreference)
-                .build();
+//        SdkAsyncHttpClient awsCrtHttpClient = AwsCrtAsyncHttpClient.builder()
+//                .tlsCipherPreference(tlsCipherPreference)
+//                .build();
+
+//        SdkHttpClient apacheClient = ApacheHttpClient.builder().build();
+        KmsClient kmsClient = KmsClient.builder().build();
+
+        LOG.info(() -> "Using Apache HTTP Client");
+
         /*
          * Set up a Java SDK 2.0 KMS Client which will use hybrid post-quantum TLS for all connections to KMS.
          */
-        KmsAsyncClient asyncKMSClient = KmsAsyncClient.builder()
-                .httpClient(awsCrtHttpClient)
-                .build();
+//        KmsAsyncClient asyncKMSClient = KmsAsyncClient.builder()
+//                .httpClient(awsCrtHttpClient)
+//                .build();
 
         /*
          * Import key material workflow with hybrid post-quantum TLS
@@ -94,7 +97,7 @@ public class AwsKmsPqTlsExample {
                 .origin(OriginType.EXTERNAL)
                 .description("Test key for aws-kms-pq-tls-example. Feel free to delete this.")
                 .build();
-        CreateKeyResponse createResponse = asyncKMSClient.createKey(createRequest).get();
+        CreateKeyResponse createResponse = kmsClient.createKey(createRequest);
         String keyId = createResponse.keyMetadata().keyId();
         LOG.info(() -> "Created CMK " + keyId);
 
@@ -108,7 +111,7 @@ public class AwsKmsPqTlsExample {
                 .wrappingKeySpec(WrappingKeySpec.RSA_2048)
                 .build();
         GetParametersForImportResponse getParametersResponse =
-                asyncKMSClient.getParametersForImport(getParametersRequest).get();
+                kmsClient.getParametersForImport(getParametersRequest);
 
         /*
          * Step 3: Prepare the parameters for the ImportKeyMaterial call.
@@ -155,7 +158,7 @@ public class AwsKmsPqTlsExample {
                 .build();
         LOG.info(() -> String.format("Importing key material into CMK %s. Using PQ TLS to protect RSA-wrapped AES key " +
                 "in transit", keyId));
-        asyncKMSClient.importKeyMaterial(importRequest).get();
+        kmsClient.importKeyMaterial(importRequest);
 
         /*
          * Sensitive cryptographic operations workflow. Use a KMS CMK to encrypt and decrypt data. The CMK can have any
@@ -172,7 +175,7 @@ public class AwsKmsPqTlsExample {
                 .build();
         LOG.info(() -> String.format("Generating a data key. Using PQ TLS to protect the plaintext data key in transit. " +
                 "The encrypted data key is encrypted under the CMK %s", keyId));
-        GenerateDataKeyResponse generateDataKeyResponse = asyncKMSClient.generateDataKey(generateDataKeyRequest).get();
+        GenerateDataKeyResponse generateDataKeyResponse = kmsClient.generateDataKey(generateDataKeyRequest);
 
         /*
          * Step 2: Use the plaintext data key for client-side encryption. You can get the plaintext data key by calling
@@ -187,7 +190,7 @@ public class AwsKmsPqTlsExample {
                 .ciphertextBlob(encryptedDataKey)
                 .build();
         LOG.info(() -> "Decrypting a KMS ciphertext. Using PQ TLS to protect the plaintext data in transit");
-        DecryptResponse decryptResponse = asyncKMSClient.decrypt(decryptRequest).get();
+        DecryptResponse decryptResponse = kmsClient.decrypt(decryptRequest);
 
         /*
          * Step 4: Use the plaintext data key to decrypt your client-side data. You can get the plaintext data key by
@@ -205,13 +208,13 @@ public class AwsKmsPqTlsExample {
                 .keyId(keyId)
                 .pendingWindowInDays(7)
                 .build();
-        ScheduleKeyDeletionResponse deletionResult = asyncKMSClient.scheduleKeyDeletion(deletionRequest).get();
+        ScheduleKeyDeletionResponse deletionResult = kmsClient.scheduleKeyDeletion(deletionRequest);
         LOG.info(() -> String.format("CMK %s is schedule to be deleted at %s", keyId, deletionResult.deletionDate()));
 
         /*
          * Shut down the SDK and HTTP client. This will free any Java and native resources created for the demo.
          */
-        asyncKMSClient.close();
-        awsCrtHttpClient.close();
+        kmsClient.close();
+//        awsCrtHttpClient.close();
     }
 }
