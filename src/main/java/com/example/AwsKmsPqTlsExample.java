@@ -81,24 +81,28 @@ public class AwsKmsPqTlsExample {
     }
 
     public static void main(String[] args) throws Exception {
-        final long durationMillis = 60 * 1000; // 60 seconds
-        final int iterations = 10;
+        final long durationMillis = 5 * 1000;
+        final int iterations = 100;
 
         long pqTotal = 0;
         long classicTotal = 0;
         try {
             for(int i = 0; i < iterations; i++) {
                 final long pqCount = benchmarkHandshakes(durationMillis, true);
-                System.out.println("\nPQ: " + pqCount);
                 final long classicCount = benchmarkHandshakes(durationMillis, false);
-                System.out.println("Classic: " + classicCount);
-
                 pqTotal += pqCount;
                 classicTotal += classicCount;
+                final long durationSec = ((i+1) * durationMillis) / 1000;
+
+                System.out.println("\nIteration: " + (i+1) + ": New Handshake Measurement: [PQ: " + pqCount + ", Classic: " + classicCount + "]");
+                System.out.println("\nPQ Total: " + pqTotal);
+                System.out.println("Classic Total: " + classicTotal);
+
+                System.out.println("\nPQ TLS Request/sec: " + (((double)pqTotal)/durationSec));
+                System.out.println("Classic TLS Handshake/sec: " + (((double)classicTotal)/durationSec));
             }
 
-            System.out.println("PQ Total: " + pqTotal);
-            System.out.println("Classic Total: " + classicTotal);
+
         } catch (Exception e) {
             e.printStackTrace();
         }
