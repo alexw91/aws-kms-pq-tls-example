@@ -18,39 +18,13 @@
 
 package com.example;
 
-import com.example.crypto.RSAUtils;
-import software.amazon.awssdk.core.SdkBytes;
+import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
 import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
 import software.amazon.awssdk.http.crt.AwsCrtAsyncHttpClient;
 import software.amazon.awssdk.services.kms.KmsAsyncClient;
-import software.amazon.awssdk.services.kms.model.AlgorithmSpec;
-import software.amazon.awssdk.services.kms.model.CreateKeyRequest;
-import software.amazon.awssdk.services.kms.model.CreateKeyResponse;
-import software.amazon.awssdk.services.kms.model.DataKeySpec;
-import software.amazon.awssdk.services.kms.model.DecryptRequest;
-import software.amazon.awssdk.services.kms.model.ListKeysResponse;
-import software.amazon.awssdk.services.kms.model.ExpirationModelType;
-import software.amazon.awssdk.services.kms.model.GenerateDataKeyRequest;
 import software.amazon.awssdk.services.kms.model.GenerateDataKeyResponse;
-import software.amazon.awssdk.services.kms.model.GetParametersForImportRequest;
-import software.amazon.awssdk.services.kms.model.GetParametersForImportResponse;
-import software.amazon.awssdk.services.kms.model.ImportKeyMaterialRequest;
-import software.amazon.awssdk.services.kms.model.OriginType;
-import software.amazon.awssdk.services.kms.model.ScheduleKeyDeletionRequest;
-import software.amazon.awssdk.services.kms.model.ScheduleKeyDeletionResponse;
-import software.amazon.awssdk.services.kms.model.WrappingKeySpec;
-import software.amazon.awssdk.utils.Logger;
 
-import javax.crypto.Cipher;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
-import java.security.SecureRandom;
-import java.security.interfaces.RSAPublicKey;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Random;
+import java.util.function.Consumer;
 
 /*
  * This Java code shows how to configure the AWS Java SDK 2.0 with the AWS Common Runtime (CRT) HTTP client and PQ
@@ -58,62 +32,76 @@ import java.util.Random;
  * key under that CMK, and decrypt the encrypted data key.
  */
 public class AwsKmsPqTlsExample {
-    private static final Logger LOG = Logger.loggerFor(AwsKmsPqTlsExample.class);
-    private static final Random SECURE_RANDOM = new SecureRandom();
     private static final int AES_KEY_SIZE_BYTES = 256 / 8;
-    private static final int AES_TAG_SIZE_BITS = 128;
-    private static final int AES_GCM_IV_BYTES = 12;
-    private static final byte[] privateData = "MySecretData".getBytes();
 
-    private static List<Long> gatherHandshakeData(int iterations, boolean pqEnabled) throws Exception {
-        List<Long> handshakeTimeMicro = new ArrayList<Long>(iterations);
-        for (int i = 0; i < iterations; i++) {
+    public static Consumer<AwsRequestOverrideConfiguration.Builder> requestCloseConnection() {
+        /* See https://tools.ietf.org/html/rfc2616#section-14.10 which specifies the "close" header to signal the
+         * connection will be closed after the server responds. This is more efficient that deleting the entire SDK and
+         * HTTP client for every transaction.
+         */
+        return b -> b.putHeader("Connection", "close");
+    }
 
-            SdkAsyncHttpClient awsCrtHttpClient = AwsCrtAsyncHttpClient.builder()
-                    .postQuantumTlsEnabled(pqEnabled)
-                    .build();
+    private static String getKeyIDArn() {
+        return "arn:aws:kms:us-west-2:431231179649:key/46568b3b-6485-4765-89d2-30d7718e145d";
+    }
 
-            KmsAsyncClient asyncKMSClient = KmsAsyncClient.builder()
+    private static long benchmarkHandshakes(long timeoutMillis, boolean pqEnabled) throws Exception {
+        long numRequests = 0;
+        try (SdkAsyncHttpClient awsCrtHttpClient = AwsCrtAsyncHttpClient.builder()
+                .postQuantumTlsEnabled(pqEnabled)
+                .build()) {
+
+            try (KmsAsyncClient asyncKMSClient = KmsAsyncClient.builder()
                     .httpClient(awsCrtHttpClient)
-                    .build();
+                    .build();) {
 
-            long start = System.nanoTime();
+                final String keyId = getKeyIDArn();
 
-            // Perform TCP Handshake + TLS Handshake + 1 HTTP Request
-            ListKeysResponse keys = asyncKMSClient.listKeys().get();
-            long end = System.nanoTime();
-            handshakeTimeMicro.add((end-start)/1000);
+                long startTime = System.currentTimeMillis();
 
-            asyncKMSClient.close();
-            awsCrtHttpClient.close();
+                do {
+                    software.amazon.awssdk.services.kms.model.GenerateDataKeyRequest dataKeyRequest =
+                            software.amazon.awssdk.services.kms.model.GenerateDataKeyRequest.builder()
+                                    .keyId(keyId)
+                                    .numberOfBytes(AES_KEY_SIZE_BYTES)
+                                    .overrideConfiguration(requestCloseConnection())
+                                    .build();
+
+                    GenerateDataKeyResponse resp = asyncKMSClient.generateDataKey(dataKeyRequest).get();
+                    numRequests++;
+
+                    if(!resp.sdkHttpResponse().isSuccessful()) {
+                        throw new RuntimeException("Error: " + resp.sdkHttpResponse().toString());
+                    }
+                } while((System.currentTimeMillis() - startTime) < timeoutMillis);
+            }
         }
-
-        return handshakeTimeMicro;
+        return numRequests;
     }
 
     public static void main(String[] args) throws Exception {
-        final int iterations = 500;
+        final long durationMillis = 60 * 1000; // 60 seconds
+        final int iterations = 10;
 
-        // Perform warm up handshakes
-        gatherHandshakeData(100, false);
-        gatherHandshakeData(100, true);
+        long pqTotal = 0;
+        long classicTotal = 0;
+        try {
+            for(int i = 0; i < iterations; i++) {
+                final long pqCount = benchmarkHandshakes(durationMillis, true);
+                System.out.println("\nPQ: " + pqCount);
+                final long classicCount = benchmarkHandshakes(durationMillis, false);
+                System.out.println("Classic: " + classicCount);
 
-        // Gather actual data
-        List<Long> classicHandshakes = gatherHandshakeData(iterations, false);
-        List<Long> pqHandshakes = gatherHandshakeData(iterations, true);
+                pqTotal += pqCount;
+                classicTotal += classicCount;
+            }
 
-        double avgClassicHandshake = classicHandshakes.stream().mapToDouble(a->a).average().getAsDouble();
-        double medianClassicHandshake = classicHandshakes.stream().mapToDouble(a->a).sorted().toArray()[iterations/2];
-        double avgPqHandshake = pqHandshakes.stream().mapToDouble(a->a).average().getAsDouble();
-        double medianPQHandshake = pqHandshakes.stream().mapToDouble(a->a).sorted().toArray()[iterations/2];
-
-        System.out.println("Classic Handshake Times: " + Arrays.toString(classicHandshakes.toArray()));
-        System.out.println("\nPQ Handshake Times: " + Arrays.toString(pqHandshakes.toArray()));
-
-        System.out.println("\nAvg Classical Request Time: " + avgClassicHandshake);
-        System.out.println("Avg PQ Request Time: " + avgPqHandshake);
-
-        System.out.println("\nMedian Classical Request Time: " + medianClassicHandshake);
-        System.out.println("Median PQ Request Time: " + medianPQHandshake);
+            System.out.println("PQ Total: " + pqTotal);
+            System.out.println("Classic Total: " + classicTotal);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }
+
